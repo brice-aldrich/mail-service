@@ -1,0 +1,46 @@
+version: 3
+
+env:
+  REPO_ROOT:
+    sh: git rev-parse --show-toplevel
+  MAIL_SERVICE_ROOT: .
+  GOOGLEAPIS_PATH: $(go env GOPATH)/src/github.com/googleapis/googleapis
+
+tasks:
+  generate:
+    desc: Run all code generators
+    cmds: 
+      - task: proto:generate
+      - task: openapi:generate
+      - task: typescript:generate
+
+  proto:generate:
+    summary: Generate proto buffer definitions
+    silent: true
+    cmds:
+      - echo Generating proto buffers...
+      - |
+        export GOOGLEAPIS_PATH=$(go env GOPATH)/src/github.com/googleapis/googleapis
+        protoc -I ./protos --go_out=./gen/go --go-grpc_out=./gen/go --grpc-gateway_out=./gen/go --grpc-gateway_opt generate_unbound_methods=true --proto_path=$GOOGLEAPIS_PATH ./protos/v1/*.proto
+        
+  openapi:generate:
+    summary: Generate OpenAPI specification from protobufs
+    cmds:
+      - echo "Generating OpenAPI specification..."
+      - |
+        export GOOGLEAPIS_PATH=$(go env GOPATH)/src/github.com/googleapis/googleapis
+        protoc -I ./protos --openapi_out=./gen/openapi --proto_path=$GOOGLEAPIS_PATH ./protos/v1/mail-service.proto
+
+  typescript:generate:
+    summary: Generate TypeScript client from OpenAPI specification
+    silent: true
+    deps:
+      - openapi:generate
+    cmds:
+      - echo "Generating TypeScript client from OpenAPI specification..."
+      - |
+        openapi-generator generate \
+          -i ./gen/openapi/openapi.yaml \
+          -g typescript-axios \
+          -o ./gen/ts/v1/typescript-client \
+          --additional-properties=useSingleRequestParameter=true

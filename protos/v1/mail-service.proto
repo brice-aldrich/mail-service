@@ -1,0 +1,27 @@
+syntax="proto3";
+
+option go_package = "/mailservice.v1";
+
+package mailservice;
+
+import "google/api/annotations.proto";
+
+
+// The MailService is a simple mail forward service for frontend contact pages.
+service MailService {
+    rpc SendMail(SendMailRequest) returns (SendMailResponse) {
+        option (google.api.http) = {
+            post: "/v1/mail/send"
+            body: "*"
+        };
+    }
+}
+
+message SendMailRequest {
+    string name = 1;
+    string email = 2;
+    optional string subject = 3;
+    string message = 4;
+}
+
+message SendMailResponse {}

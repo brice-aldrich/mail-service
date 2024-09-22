@@ -1,0 +1,27 @@
+{
+  "name": "@baldrich13/mail-service-client",
+  "version": "1.0.1",
+  "description": "TypeScript client for Mail Service API",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "yarn run tsc",
+    "prepublishOnly": "yarn run build"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "mail",
+    "api",
+    "client"
+  ],
+  "author": "Your Name",
+  "license": "ISC",
+  "devDependencies": {
+    "typescript": "^5.6.2"
+  },
+  "dependencies": {
+    "axios": "^1.7.7"
+  }
+}

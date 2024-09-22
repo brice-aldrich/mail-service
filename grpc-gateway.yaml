@@ -1,0 +1,9 @@
+# grpc-gateway.yaml
+
+# Configuration for gRPC Gateway to generate OpenAPI specification
+openapi:
+  # Output file for the OpenAPI spec
+  output: ./gen/openapi/api.json
+  # Additional options can be specified here
+  # For example, set to true to use fully qualified names
+  use_fully_qualified_names: no
