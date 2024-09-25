@@ -2,6 +2,7 @@ package mail
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,17 +49,27 @@ type Orchestrator interface {
 //   - FromEmail: The email address from which emails will be sent.
 //   - Logger: The zap.Logger object used for logging.
 type Config struct {
-	SES          sesClient
-	ForwardEmail string
-	FromEmail    string
-	Logger       *zap.Logger
+	SES                     sesClient
+	ForwardEmail            string
+	FromEmail               string
+	ForwardTemplateEncoded  string
+	ThankYouTemplateEncoded string
+	Logger                  *zap.Logger
 }
 
 type orchestrator struct {
-	ses          sesClient
-	forwardEmail string
-	fromEmail    string
-	logger       *zap.Logger
+	ses              sesClient
+	forwardEmail     string
+	fromEmail        string
+	thankYouTemplate emailTemplate
+	forwardTemplate  emailTemplate
+	logger           *zap.Logger
+}
+
+// emailTemplate - a wrapper for CreateEmailTemplateInput and UpdateEmailTemplateInput from AWS SES sdk
+type emailTemplate struct {
+	Name    string
+	Content *types.EmailTemplateContent
 }
 
 // New creates a new instance of the Orchestrator with the provided configuration.
@@ -80,53 +91,67 @@ func New(ctx context.Context, cfg Config) (Orchestrator, error) {
 		logger:       cfg.Logger,
 	}
 
-	if err := o.initTemplates(ctx); err != nil {
+	var err error
+	o.forwardTemplate, err = constructForwardTemplate(cfg.ForwardTemplateEncoded)
+	if err != nil {
 		return nil, err
+	}
+
+	o.thankYouTemplate, err = constructThankYouTemplate(cfg.ThankYouTemplateEncoded)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := o.initTemplate(ctx, o.forwardTemplate); err != nil {
+		return nil, fmt.Errorf("failed to initialize forward template: %w", err)
+	}
+
+	if err := o.initTemplate(ctx, o.thankYouTemplate); err != nil {
+		return nil, fmt.Errorf("failed to initialize thank you template: %w", err)
 	}
 
 	return o, nil
 }
 
-// initTemplates initializes or updates email templates in AWS SES based on the provided templates.
-// It iterates over a predefined list of templates and performs the following actions for each template:
+// initTemplate initializes or updates a single email template in AWS SES based on the provided template.
+// It performs the following actions:
 // 1. Checks if the template already exists in AWS SES.
 // 2. If the template does not exist, it creates the template in AWS SES.
 // 3. If the template exists, it updates the template in AWS SES.
 //
 // Parameters:
 //   - ctx: The context.Context object for the request.
+//   - t: The emailTemplate object containing the template name and content.
 //
 // Returns:
-//   - error: An error if any occurred during the initialization or updating of the email templates.
-func (o orchestrator) initTemplates(ctx context.Context) error {
-	for _, t := range templates {
-		_, err := o.ses.GetEmailTemplate(ctx, &sesv2.GetEmailTemplateInput{
-			TemplateName: &t.Name,
-		})
-		if err != nil {
-			var notFoundErr *types.NotFoundException
-			if errors.As(err, &notFoundErr) {
-				_, err := o.ses.CreateEmailTemplate(ctx, &sesv2.CreateEmailTemplateInput{
-					TemplateName:    &t.Name,
-					TemplateContent: t.Content,
-				})
-				if err != nil {
-					return fmt.Errorf("failed to create email template with aws ses: %w", err)
-				}
-
-				continue
+//   - error: An error if any occurred during the initialization or updating of the email template.
+func (o orchestrator) initTemplate(ctx context.Context, t emailTemplate) error {
+	_, err := o.ses.GetEmailTemplate(ctx, &sesv2.GetEmailTemplateInput{
+		TemplateName: &t.Name,
+	})
+	if err != nil {
+		var notFoundErr *types.NotFoundException
+		if errors.As(err, &notFoundErr) {
+			_, err := o.ses.CreateEmailTemplate(ctx, &sesv2.CreateEmailTemplateInput{
+				TemplateName:    &t.Name,
+				TemplateContent: t.Content,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to create email template with aws ses: %w", err)
 			}
 
-			return fmt.Errorf("failed to initialize email template with aws ses: %w", err)
+			return nil
 		}
 
-		_, err = o.ses.UpdateEmailTemplate(ctx, &sesv2.UpdateEmailTemplateInput{
-			TemplateName:    &t.Name,
-			TemplateContent: t.Content,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to update email template with aws ses: %w", err)
-		}
+		return fmt.Errorf("failed to initialize email template with aws ses: %w", err)
+	}
+
+	_, err = o.ses.UpdateEmailTemplate(ctx, &sesv2.UpdateEmailTemplateInput{
+		TemplateName:    &t.Name,
+		TemplateContent: t.Content,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to update email template with aws ses: %w", err)
 	}
 
 	return nil
@@ -147,7 +172,7 @@ func (o orchestrator) initTemplates(ctx context.Context) error {
 //   - *mailservice_v1.SendMailResponse: The response object indicating the result of the send mail operation.
 //   - error: An error if any occurred during the preparation of template data or sending of emails.
 func (o orchestrator) SendMail(ctx context.Context, req *mailservice_v1.SendMailRequest) (*mailservice_v1.SendMailResponse, error) {
-	forwardData, err := constructForwardTemplateData(req.Message, req.Email)
+	forwardData, err := constructForwardTemplateData(req.Message, req.Name, req.Email, req.Subject)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to prepare forward template data: %v", err)
 	}
@@ -155,7 +180,7 @@ func (o orchestrator) SendMail(ctx context.Context, req *mailservice_v1.SendMail
 	_, err = o.ses.SendEmail(ctx, &sesv2.SendEmailInput{
 		Content: &types.EmailContent{
 			Template: &types.Template{
-				TemplateName: &forwardName,
+				TemplateName: &o.forwardTemplate.Name,
 				TemplateData: forwardData,
 			},
 		},
@@ -170,34 +195,76 @@ func (o orchestrator) SendMail(ctx context.Context, req *mailservice_v1.SendMail
 
 	o.logger.Info("Forward email sent", zap.String("to", o.forwardEmail))
 
-	// thankYouData, err := constructThankYouTemplateData(req.Message)
-	// if err != nil {
-	// 	return nil, status.Errorf(codes.Internal, "failed to prepare thank you template data: %v", err)
-	// }
+	thankYouData, err := constructThankYouTemplateData(req.Message)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to prepare thank you template data: %v", err)
+	}
 
-	// _, err = o.ses.SendEmail(ctx, &sesv2.SendEmailInput{
-	// 	Content: &types.EmailContent{
-	// 		Template: &types.Template{
-	// 			TemplateName: &thankYouTemplateName,
-	// 			TemplateData: thankYouData,
-	// 		},
-	// 	},
-	// 	Destination: &types.Destination{
-	// 		ToAddresses: []string{req.Email},
-	// 	},
-	// 	FromEmailAddress: &o.fromEmail,
-	// })
-	// if err != nil {
-	// 	return nil, status.Errorf(codes.Internal, "failed to send email thank you email: %v", err)
-	// }
+	_, err = o.ses.SendEmail(ctx, &sesv2.SendEmailInput{
+		Content: &types.EmailContent{
+			Template: &types.Template{
+				TemplateName: &o.thankYouTemplate.Name,
+				TemplateData: thankYouData,
+			},
+		},
+		Destination: &types.Destination{
+			ToAddresses: []string{req.Email},
+		},
+		FromEmailAddress: &o.fromEmail,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to send email thank you email: %v", err)
+	}
 
 	return &mailservice_v1.SendMailResponse{}, nil
 }
 
-func constructForwardTemplateData(message string, from string) (*string, error) {
+func constructForwardTemplate(encodedTemplate string) (emailTemplate, error) {
+	v, err := base64.StdEncoding.DecodeString(encodedTemplate)
+	if err != nil {
+		return emailTemplate{}, fmt.Errorf("failed to decode forward template: %w", err)
+	}
+
+	subject := "Portfolio Contact Form Submission"
+	template := string(v)
+	return emailTemplate{
+		Name: "ForwardTemplate",
+		Content: &types.EmailTemplateContent{
+			Subject: &subject,
+			Html:    &template,
+		},
+	}, nil
+}
+
+func constructThankYouTemplate(encodedTemplate string) (emailTemplate, error) {
+	v, err := base64.StdEncoding.DecodeString(encodedTemplate)
+	if err != nil {
+		return emailTemplate{}, fmt.Errorf("failed to decode thank you template: %w", err)
+	}
+
+	subject := "Thank you for your interest"
+	template := string(v)
+	return emailTemplate{
+		Name: "ThankYouTemplate",
+		Content: &types.EmailTemplateContent{
+			Subject: &subject,
+			Html:    &template,
+		},
+	}, nil
+}
+
+func constructForwardTemplateData(message string, name string, email string, subject *string) (*string, error) {
+	defaultSubject := "Portfolio Contact Form Inquiry"
+
+	if subject == nil {
+		subject = &defaultSubject
+	}
+
 	templateData := map[string]string{
-		"text": message,
-		"from": from,
+		"message": message,
+		"name":    name,
+		"email":   email,
+		"subject": *subject,
 	}
 
 	v, err := json.Marshal(&templateData)

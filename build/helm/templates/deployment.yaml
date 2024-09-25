@@ -39,16 +39,25 @@ spec:
               containerPort: {{ .Values.service.port }}
               protocol: TCP
           env:
+            - name: EMAIL_SERVICE_ENABLE_GATEWAY
+              value: {{ .Values.env.enableGRPCGateway }}
+            - name: EMAIL_SERVICE_HTTP_HOST
+              value: "0.0.0.0"
+            - name: EMAIL_SERVICE_HTTP_PORT
+              value: {{ .Values.httpService.targetPort }}
+            - name: EMAIL_SERVICE_GRPC_HOST
+              value: "0.0.0.0"
+            - name: EMAIL_SERVICE_GRPC_PORT
+              value: {{ .Values.grpcService.targetPort }}
             - name: EMAIL_SERVICE_EMAIL_FROM
               value: {{ .Values.env.fromEmail }}
             - name: EMAIL_SERVICE_EMAIL_FORWARD
               value: {{ .Values.env.forwardEmail }}
             - name: EMAIL_SERVICE_EMAIL_THANK_YOU_TEMPLATE
               value: {{ .Values.env.forwardEmailTemplate }}
-            - name: EMAIL_SERVICE_PORT
-              value: "8080"
-            - name: EMAIL_SERVICE_LISTEN_ADDRESS
-              value: "0.0.0.0"
+            - name: EMAIL_SERVICE_EMAIL_FORWARD_TEMPLATE
+              value: {{ .Values.env.thankYouEmailTemplate }}
+
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- with .Values.volumeMounts }}

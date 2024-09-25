@@ -17,14 +17,18 @@ type Config struct {
 	Email   Email
 }
 
-// Service holds the configuration for the service, including the port and listen address.
+// Service holds the configuration for the email service, including settings for both the HTTP and gRPC servers.
 //
 // Fields:
-//   - Port: The port on which the email service will listen. It is loaded from the environment variable "EMAIL_SERVICE_PORT" with a default value of 8080.
-//   - ListenAddress: The address on which the email service will listen. It is loaded from the environment variable "EMAIL_SERVICE_LISTEN_ADDRESS" with a default value of "0.0.0.0".
+//   - EnableGateway: A boolean flag indicating whether the gRPC-Gateway should be enabled. It is loaded from the environment variable "EMAIL_SERVICE_ENABLE_GATEWAY" with a default value of false.
+//   - HTTPHost: The host address for the HTTP server. It is loaded from the environment variable "EMAIL_SERVICE_HTTP_HOST" with a default value of "0.0.0.0".
+//   - HTTPPort: The port number for the HTTP server. It is loaded from the environment variable "EMAIL_SERVICE_HTTP_PORT" with a default value of 8080.
+//   - GRPCHost: The host address for the gRPC server. It is loaded from the environment variable "EMAIL_SERVICE_GRPC_HOST" with a default value of "127.0.0.1".
+//   - GRPCPort: The port number for the gRPC server. It is loaded from the environment variable "EMAIL_SERVICE_GRPC_PORT" with a default value of 8081.
 type Service struct {
-	ListenAddress string `env:"EMAIL_SERVICE_LISTEN_ADDRESS" envDefault:"0.0.0.0"`
-	Port          int    `env:"EMAIL_SERVICE_PORT" envDefault:"8080"`
+	EnableGateway bool   `env:"EMAIL_SERVICE_ENABLE_GATEWAY" envDefault:"false"`
+	HTTPHost      string `env:"EMAIL_SERVICE_HTTP_HOST" envDefault:"0.0.0.0"`
+	HTTPPort      int    `env:"EMAIL_SERVICE_HTTP_PORT" envDefault:"8080"`
 	GRPCHost      string `env:"EMAIL_SERVICE_GRPC_HOST" envDefault:"127.0.0.1"`
 	GRPCPort      int    `env:"EMAIL_SERVICE_GRPC_PORT" envDefault:"8081"`
 }
@@ -38,7 +42,8 @@ type Service struct {
 type Email struct {
 	From             string `env:"EMAIL_SERVICE_EMAIL_FROM"`
 	Forward          string `env:"EMAIL_SERVICE_EMAIL_FORWARD"`
-	ThankYouTemplate string `env:"EMAIL_SERVICE_EMAIL_THANK_YOU_TEMPLATE"`
+	ThankYouTemplate string `env:"EMAIL_SERVICE_EMAIL_THANK_YOU_TEMPLATE"` // base64 standard encodec html template
+	ForwardTemplate  string `env:"EMAIL_SERVICE_EMAIL_FORWARD_TEMPLATE"`   // base64 standard encodec html template
 }
 
 // Load loads the configuration from environment variables using the env package.

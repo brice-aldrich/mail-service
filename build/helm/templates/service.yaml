@@ -1,15 +1,33 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "email-service.fullname" . }}
+  name: {{ include "email-service.fullname" . }}-grpc
   labels:
     {{- include "email-service.labels" . | nindent 4 }}
 spec:
-  type: {{ .Values.service.type }}
+  type: {{ .Values.grpcService.type }}
   ports:
-    - port: {{ .Values.service.port }}
-      targetPort: 8080
+    - port: {{ .Values.grpcService.port }}
+      targetPort: {{ .Values.grpcService.targetPort }}
       protocol: TCP
-      name: grpc
+      name: gRPC
   selector:
     {{- include "email-service.selectorLabels" . | nindent 4 }}
+---
+{{- if .Values.env.enableGRPCGateway }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "email-service.fullname" . }}-http
+  labels:
+    {{- include "email-service.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.httpService.type }}
+  ports:
+    - port: {{ .Values.httpService.port }}
+      targetPort: {{ .Values.httpService.targetPort }}
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "email-service.selectorLabels" . | nindent 4 }}
+{{- end }}
