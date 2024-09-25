@@ -35,29 +35,35 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
+            {{- if .Values.env.enableGRPCGateway }}
             - name: http
-              containerPort: {{ .Values.service.port }}
+              containerPort: {{ .Values.httpService.targetPort }}
+              protocol: TCP
+            {{- end }}
+            - name: grpc
+              containerPort: {{ .Values.grpcService.targetPort }}
               protocol: TCP
           env:
             - name: EMAIL_SERVICE_ENABLE_GATEWAY
-              value: {{ .Values.env.enableGRPCGateway }}
+              value: "{{ .Values.env.enableGRPCGateway }}"
             - name: EMAIL_SERVICE_HTTP_HOST
               value: "0.0.0.0"
+            {{- if .Values.env.enableGRPCGateway }}
             - name: EMAIL_SERVICE_HTTP_PORT
-              value: {{ .Values.httpService.targetPort }}
+              value: "{{ .Values.httpService.targetPort }}"
+            {{- end }}
             - name: EMAIL_SERVICE_GRPC_HOST
               value: "0.0.0.0"
             - name: EMAIL_SERVICE_GRPC_PORT
-              value: {{ .Values.grpcService.targetPort }}
+              value: "{{ .Values.grpcService.targetPort }}"
             - name: EMAIL_SERVICE_EMAIL_FROM
-              value: {{ .Values.env.fromEmail }}
+              value: "{{ .Values.env.fromEmail }}"
             - name: EMAIL_SERVICE_EMAIL_FORWARD
-              value: {{ .Values.env.forwardEmail }}
+              value: "{{ .Values.env.forwardEmail }}"
             - name: EMAIL_SERVICE_EMAIL_THANK_YOU_TEMPLATE
-              value: {{ .Values.env.forwardEmailTemplate }}
+              value: "{{ .Values.env.forwardEmailTemplate }}"
             - name: EMAIL_SERVICE_EMAIL_FORWARD_TEMPLATE
-              value: {{ .Values.env.thankYouEmailTemplate }}
-
+              value: "{{ .Values.env.thankYouEmailTemplate }}"
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- with .Values.volumeMounts }}

@@ -8,8 +8,14 @@ metadata:
     "helm.sh/hook": test
 spec:
   containers:
-    - name: wget
+    {{- if .Values.env.enableGRPCGateway }}
+    - name: test-http
       image: busybox
       command: ['wget']
-      args: ['{{ include "email-service.fullname" . }}:{{ .Values.service.port }}']
+      args: ['{{ include "email-service.fullname" . }}:{{ .Values.httpService.port }}']
+    {{- end }}
+    - name: test-grpc
+      image: busybox
+      command: ['nc']
+      args: ['-vz', '{{ include "email-service.fullname" . }}', '{{ .Values.grpcService.port }}']
   restartPolicy: Never

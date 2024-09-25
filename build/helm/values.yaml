@@ -5,9 +5,9 @@
 replicaCount: 1
 
 image:
-  repository: 339713094731.dkr.ecr.us-east-2.amazonaws.com/email-service
+  repository: ""
   pullPolicy: IfNotPresent
-  tag: "latest"
+  tag: ""
 
 nameOverride: ""
 fullnameOverride: ""

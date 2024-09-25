@@ -10,7 +10,7 @@ spec:
     - port: {{ .Values.grpcService.port }}
       targetPort: {{ .Values.grpcService.targetPort }}
       protocol: TCP
-      name: gRPC
+      name: grpc
   selector:
     {{- include "email-service.selectorLabels" . | nindent 4 }}
 ---
