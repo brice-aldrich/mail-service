@@ -11,6 +11,7 @@ import (
 	mailservice_v1 "github.com/brice-aldrich/mail-service/gen/go/mailservice.v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
 
 func TestInitTemplatesUnit(t *testing.T) {
@@ -100,6 +101,9 @@ func TestInitTemplatesUnit(t *testing.T) {
 }
 
 func TestSendMailUnit(t *testing.T) {
+	logger, err := zap.NewDevelopment()
+	require.Empty(t, err)
+
 	type input struct {
 		ses sesClient
 	}
@@ -159,7 +163,8 @@ func TestSendMailUnit(t *testing.T) {
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
 			o := orchestrator{
-				ses: tt.input.ses,
+				ses:    tt.input.ses,
+				logger: logger,
 			}
 
 			_, err := o.SendMail(context.Background(), &mailservice_v1.SendMailRequest{})

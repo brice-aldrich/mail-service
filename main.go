@@ -43,6 +43,7 @@ func main() {
 		SES:          sesv2.NewFromConfig(awsConfig),
 		ForwardEmail: cfg.Email.Forward,
 		FromEmail:    cfg.Email.From,
+		Logger:       zlog,
 	})
 	if err != nil {
 		zlog.With(zap.Error(err)).Fatal("Failed to setup mail orchestrator.")

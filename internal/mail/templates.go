@@ -140,5 +140,5 @@ var (
 		Subject: &forwardSubject,
 		Text:    &thankYouTemplateText,
 	}
-	thankYouTemplateText = "{{text}}"
+	thankYouTemplateText = "From: {{from}}: {{text}}"
 )

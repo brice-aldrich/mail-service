@@ -75,5 +75,5 @@ affinity: {}
 
 env:
   fromEmail: noreply@mail.bricealdrich.com
-  forwardEmail: hi@bricealdrich.com
+  forwardEmail: baldrich@protonmail.com
   forwardEmailTemplate: ""

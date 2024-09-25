@@ -81,7 +81,7 @@ func (g gateway) Register(ctx context.Context, opts ...grpc.DialOption) error {
 //   - error: An error if any occurred during the server startup or while listening for requests.
 func (g gateway) Serve() error {
 	withCors := cors.New(cors.Options{
-		AllowedOrigins: []string{"*"},
+		AllowedOrigins: []string{"https://www.bricealdrich.com", "http://localhost:3000"},
 		AllowedMethods: []string{http.MethodPost, http.MethodOptions, http.MethodGet},
 	}).Handler(g.mux)
 

@@ -147,7 +147,7 @@ func (o orchestrator) initTemplates(ctx context.Context) error {
 //   - *mailservice_v1.SendMailResponse: The response object indicating the result of the send mail operation.
 //   - error: An error if any occurred during the preparation of template data or sending of emails.
 func (o orchestrator) SendMail(ctx context.Context, req *mailservice_v1.SendMailRequest) (*mailservice_v1.SendMailResponse, error) {
-	forwardData, err := constructForwardTemplateData(req.Message)
+	forwardData, err := constructForwardTemplateData(req.Message, req.Email)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to prepare forward template data: %v", err)
 	}
@@ -194,9 +194,10 @@ func (o orchestrator) SendMail(ctx context.Context, req *mailservice_v1.SendMail
 	return &mailservice_v1.SendMailResponse{}, nil
 }
 
-func constructForwardTemplateData(message string) (*string, error) {
+func constructForwardTemplateData(message string, from string) (*string, error) {
 	templateData := map[string]string{
 		"text": message,
+		"from": from,
 	}
 
 	v, err := json.Marshal(&templateData)
