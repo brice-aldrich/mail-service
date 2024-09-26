@@ -9,32 +9,44 @@ on:
       - main
 
 jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.60
+
   unit_test:
     name: Unit Tests
     runs-on: [self-hosted]
-    environment: personal
     container:
-      image: golang:1.22
+      image: golang:1.23.1
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Run Unit Tests
         run: |
           echo "Running tests..."
           go test -v --run=Unit ./...
 
-  build:
+  build_and_push:
     name: Build and Push Docker Image
     runs-on: [self-hosted]
+    needs: [lint, unit_test]
     environment: personal
-    needs: unit_test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
     env:
       AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
       IMAGE_TAG: ${{ secrets.AWS_ECR_REGISTRY }}/${{ github.event.repository.name }}:${{ github.sha }}
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Install AWS CLI
         run: |
           sudo apt-get update
@@ -57,28 +69,52 @@ jobs:
         if: always()
         run: docker logout ${{ secrets.AWS_ECR_REGISTRY }}
 
-  deploy:
-    name: Deploy with Helm
+  deploy_prod:
+    name: Deploy to Main (Production)
     runs-on: [self-hosted]
     environment: personal
-    needs: build
+    needs: build_and_push
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     env:
       REPOSITORY: ${{ secrets.AWS_ECR_REGISTRY }}/${{ github.event.repository.name }}
       IMAGE_TAG: ${{ github.sha }}
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v3
-
+        uses: actions/checkout@v4
       - name: Deploy Helm
         uses: bitovi/github-actions-deploy-eks-helm@v1.2.10
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
-          cluster-name: healthaura-east-1-eks
+          cluster-name: ${{ secrets.AWS_EKS_CLUSTER }}
           config-files: ./build/helm/values.yaml
           chart-path: ./build/helm
           namespace: personal
-          values: image.tag=${{ env.IMAGE_TAG }},image.repository=${{ env.REPOSITORY }}
+          values: image.tag=${{ env.IMAGE_TAG }},replicaCount=2,httpIngress.enabled=true,httpIngress.hosts[0].host=mail.bricealdrich.com,httpIngress.hosts[0].paths[0].path=/,httpIngress.hosts[0].paths[0].pathType=ImplementationSpecific,httpIngress.tls[0].secretName=mail-bricealdrich-com-tls,httpIngress.tls[0].hosts[0]=mail.bricealdrich.com,env.enableGRPCGateway=true,grpcIngress.enabled=false,fromEmail=${{ secrets.FROM_EMAIL }},forwardEmail=${{ secrets.FORWARD_EMAIL }},forwardEmailTemplate=${{ secrets.FORWARD_TEMPLATE }},thankYouEmailTemplate=${{ secrets.THANKYOU_TEMPLATE }}
           name: email-service
+
+  deploy_intg:
+    name: Deploy PR (Staging)
+    runs-on: [self-hosted]
+    environment: personal-intg
+    needs: build_and_push
+    if: github.event_name == 'pull_request'
+    env:
+      REPOSITORY: ${{ secrets.AWS_ECR_REGISTRY }}/${{ github.event.repository.name }}
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Deploy Helm
+        uses: bitovi/github-actions-deploy-eks-helm@v1.2.10
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+          cluster-name: ${{ secrets.AWS_EKS_CLUSTER }}
+          config-files: ./build/helm/values.yaml
+          chart-path: ./build/helm
+          namespace: personal-intg
+          values: image.tag=${{ env.IMAGE_TAG }},image.repository=${{ env.REPOSITORY }},httpIngress.enabled=true,httpIngress.hosts[0].host=intg.mail.bricealdrich.com,httpIngress.hosts[0].paths[0].path=/,httpIngress.hosts[0].paths[0].pathType=ImplementationSpecific,httpIngress.tls[0].secretName=intg-mail-bricealdrich-com-tls,httpIngress.tls[0].hosts[0]=intg.mail.bricealdrich.com,env.enableGRPCGateway=true,grpcIngress.enabled=false,fromEmail=${{ secrets.FROM_EMAIL }},forwardEmail=${{ secrets.FORWARD_EMAIL }},forwardEmailTemplate=${{ secrets.FORWARD_TEMPLATE }},thankYouEmailTemplate=${{ secrets.THANKYOU_TEMPLATE }}
+          name: email-service-intg-${{ github.event.pull_request.number }}

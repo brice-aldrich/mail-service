@@ -20,8 +20,8 @@ import (
 //   - GRPCHost: The host address for the gRPC server.
 //   - GRPCPort: The port number for the gRPC server.
 type Config struct {
-	Host     string
-	Port     int
+	HTTPHost string
+	HTTPPort int
 	GRPCHost string
 	GRPCPort int
 }
@@ -53,8 +53,8 @@ type gateway struct {
 //   - *gateway: The newly created gateway instance.
 func New(cfg Config) *gateway {
 	return &gateway{
-		host:     cfg.Host,
-		port:     cfg.Port,
+		host:     cfg.HTTPHost,
+		port:     cfg.HTTPPort,
 		grpcHost: cfg.GRPCHost,
 		grpcPort: cfg.GRPCPort,
 		mux:      runtime.NewServeMux(),

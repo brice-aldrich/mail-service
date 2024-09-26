@@ -5,7 +5,7 @@
 replicaCount: 1
 
 image:
-  repository: 339713094731.dkr.ecr.us-east-2.amazonaws.com/email-service
+  repository: ""
   pullPolicy: IfNotPresent
   tag: ""
 
@@ -25,35 +25,61 @@ podSecurityContext: {}
 
 securityContext: {}
 
-service:
+httpService:
   type: ClusterIP
   port: 80
+  targetPort: 8080
 
-ingress:
-  enabled: true
+grpcService:
+    type: ClusterIP
+    port: 50051
+    targetPort: 50052
+
+httpIngress:
+  enabled: false
   className: ""
   annotations: {
     cert-manager.io/cluster-issuer: "letsencrypt-prod",
     kubernetes.io/ingress.class: "nginx",
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP",
-    nginx.ingress.kubernetes.io/ssl-redirect: "true",
-    nginx.ingress.kubernetes.io/force-ssl-redirect: "true",
-    nginx.ingress.kubernetes.io/use-port-in-redirects: "true",
     nginx.ingress.kubernetes.io/limit-rpm: "3",
     nginx.ingress.kubernetes.io/enable-cors: "true",
-    nginx.ingress.kubernetes.io/cors-allow-methods: "PUT, GET, POST, OPTIONS",
+    nginx.ingress.kubernetes.io/cors-allow-methods: "POST, OPTIONS",
     nginx.ingress.kubernetes.io/cors-allow-origin: "*",
     nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
   }
   hosts:
-    - host: mail.bricealdrich.com
+    - host: ""
       paths:
         - path: /
           pathType: ImplementationSpecific
   tls: 
-   - secretName: mail-bricealdrich-tls
+   - secretName: ""
      hosts:
-       - mail.bricealdrich.com
+       - ""
+
+grpcIngress:
+  enabled: false
+  className: ""
+  annotations: {
+    cert-manager.io/cluster-issuer: "letsencrypt-prod",
+    kubernetes.io/ingress.class: "nginx",
+    nginx.ingress.kubernetes.io/backend-protocol: "GRPC",
+    nginx.ingress.kubernetes.io/limit-rpm: "3",
+    nginx.ingress.kubernetes.io/enable-cors: "true",
+    nginx.ingress.kubernetes.io/cors-allow-methods: "POST, OPTIONS",
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*",
+    nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
+  }
+  hosts:
+    - host: ""
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: 
+   - secretName: ""
+     hosts:
+       - ""
 
 resources: {}
 
@@ -74,6 +100,8 @@ tolerations: []
 affinity: {}
 
 env:
-  fromEmail: noreply@mail.bricealdrich.com
-  forwardEmail: baldrich@protonmail.com
+  fromEmail: ""
+  forwardEmail: ""
   forwardEmailTemplate: ""
+  thankYouEmailTemplate: ""
+  enableGRPCGateway: ""

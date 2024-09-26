@@ -94,7 +94,7 @@ func TestInitTemplatesUnit(t *testing.T) {
 				ses: tt.input.ses,
 			}
 
-			err := o.initTemplates(context.Background())
+			err := o.initTemplate(context.Background(), emailTemplate{})
 			tt.want.errAssertion(t, err)
 		})
 	}
@@ -131,20 +131,20 @@ func TestSendMailUnit(t *testing.T) {
 				},
 			},
 		},
-		// {
-		// 	"handles failure to send thank you email",
-		// 	input{
-		// 		ses: &mockSESClient{
-		// 			sendEmailErrors: []string{"", "error sending thank you email"},
-		// 		},
-		// 	},
-		// 	want{
-		// 		errAssertion: func(t *testing.T, err error) {
-		// 			require.NotEmpty(t, err)
-		// 			assert.Contains(t, err.Error(), "error sending thank you email")
-		// 		},
-		// 	},
-		// },
+		{
+			"handles failure to send thank you email",
+			input{
+				ses: &mockSESClient{
+					sendEmailErrors: []string{"", "error sending thank you email"},
+				},
+			},
+			want{
+				errAssertion: func(t *testing.T, err error) {
+					require.NotEmpty(t, err)
+					assert.Contains(t, err.Error(), "error sending thank you email")
+				},
+			},
+		},
 		{
 			"is successful",
 			input{

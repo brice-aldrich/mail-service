@@ -40,10 +40,12 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
 	mailOrch, err := mail.New(ctx, mail.Config{
-		SES:          sesv2.NewFromConfig(awsConfig),
-		ForwardEmail: cfg.Email.Forward,
-		FromEmail:    cfg.Email.From,
-		Logger:       zlog,
+		SES:                     sesv2.NewFromConfig(awsConfig),
+		ForwardEmail:            cfg.Email.Forward,
+		FromEmail:               cfg.Email.From,
+		ThankYouTemplateEncoded: cfg.Email.ThankYouTemplate,
+		ForwardTemplateEncoded:  cfg.Email.ForwardTemplate,
+		Logger:                  zlog,
 	})
 	if err != nil {
 		zlog.With(zap.Error(err)).Fatal("Failed to setup mail orchestrator.")
@@ -58,30 +60,34 @@ func main() {
 	mailService := server.New(mailOrch)
 	mailservice_v1.RegisterMailServiceServer(grpcServer, mailService)
 
-	gw := gateway.New(gateway.Config{
-		Host:     cfg.Service.ListenAddress,
-		Port:     cfg.Service.Port,
-		GRPCHost: cfg.Service.GRPCHost,
-		GRPCPort: cfg.Service.GRPCPort,
-	})
+	if cfg.Service.EnableGateway {
+		gw := gateway.New(gateway.Config{
+			HTTPHost: cfg.Service.HTTPHost,
+			HTTPPort: cfg.Service.HTTPPort,
+			GRPCHost: cfg.Service.GRPCHost,
+			GRPCPort: cfg.Service.GRPCPort,
+		})
 
-	if err := gw.Register(context.Background(), grpc.WithTransportCredentials(insecure.NewCredentials())); err != nil {
-		zlog.With(zap.Error(err)).Fatal("Failed to register gRPC gateway.")
-	}
-
-	go func() {
-		if err := gw.Serve(); err != nil {
-			zlog.With(zap.Error(err)).Fatal("Failed to service gRPC gateway.")
+		if err := gw.Register(context.Background(), grpc.WithTransportCredentials(insecure.NewCredentials())); err != nil {
+			zlog.With(zap.Error(err)).Fatal("Failed to register gRPC gateway.")
 		}
-	}()
+
+		go func() {
+			zlog.With(zap.Int("port", cfg.Service.GRPCPort), zap.String("host", cfg.Service.GRPCHost)).Info("Starting gRPC Gateway Email Service.")
+
+			if err := gw.Serve(); err != nil {
+				zlog.With(zap.Error(err)).Fatal("Failed to service gRPC gateway.")
+			}
+		}()
+	}
 
 	lis, err := net.Listen("tcp", fmt.Sprintf("%s:%d", cfg.Service.GRPCHost, cfg.Service.GRPCPort))
 	if err != nil {
-		zlog.With(zap.Error(err), zap.Int("port", cfg.Service.Port), zap.String("host", cfg.Service.ListenAddress)).Fatal("Failed to open TCP socket.")
+		zlog.With(zap.Error(err), zap.Int("port", cfg.Service.GRPCPort), zap.String("host", cfg.Service.GRPCHost)).Fatal("Failed to open TCP socket.")
 	}
 
-	zlog.With(zap.Int("port", cfg.Service.Port), zap.String("host", cfg.Service.ListenAddress)).Info("Starting Email Service.")
+	zlog.With(zap.Int("port", cfg.Service.GRPCPort), zap.String("host", cfg.Service.GRPCHost)).Info("Starting gRPC Email Service.")
 	if err := grpcServer.Serve(lis); err != nil {
-		zlog.With(zap.Error(err), zap.Int("port", cfg.Service.Port), zap.String("host", cfg.Service.ListenAddress)).Fatal("Failed to start email service.")
+		zlog.With(zap.Error(err), zap.Int("port", cfg.Service.GRPCPort), zap.String("host", cfg.Service.GRPCHost)).Fatal("Failed to start email service.")
 	}
 }
