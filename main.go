@@ -2,86 +2,139 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
-	"net"
+	"net/http"
 	"time"
 
-	"github.com/brice-aldrich/mail-service/config"
-	mailservice_v1 "github.com/brice-aldrich/mail-service/gen/go/mailservice.v1"
-	"github.com/brice-aldrich/mail-service/internal/gateway"
-	"github.com/brice-aldrich/mail-service/internal/mail"
-	"github.com/brice-aldrich/mail-service/internal/server"
-
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-lambda-go/events"
+	"github.com/aws/aws-lambda-go/lambda"
+	awsConfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sesv2"
-	grpc_zap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
+	"github.com/brice-aldrich/mail-service/config"
+	"github.com/brice-aldrich/mail-service/internal/mail"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
-func main() {
-	zlog, err := zap.NewProduction()
-	if err != nil {
-		log.Fatalf("Failed to start logger: %s", err.Error())
-	}
+type Handler func(context.Context, events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error)
+type contextKey string
 
-	cfg, err := config.Load()
-	if err != nil {
-		zlog.With(zap.Error(err)).Fatal("Failed to load application configuration.")
-	}
+const (
+	correlationIDKey contextKey = "X-Correlation-ID"
+	loggerKey        contextKey = "logger"
+)
 
-	awsConfig, err := awsconfig.LoadDefaultConfig(context.Background(), awsconfig.WithRegion("us-east-1"))
+var (
+	cfg      *config.Config
+	mailOrch mail.Orchestrator
+	zlog     *zap.Logger
+)
+
+func init() {
+	logger, err := zap.NewProduction()
+	if err != nil {
+		log.Fatalf("Unable to initialize logger, %v", err)
+	}
+	zlog = logger
+
+	awsCfg, err := awsConfig.LoadDefaultConfig(context.Background())
 	if err != nil {
 		zlog.With(zap.Error(err)).Fatal("Failed to load AWS configuration.")
 	}
 
+	cfg, err = config.Load()
+	if err != nil {
+		zlog.With(zap.Error(err)).Fatal("Failed to load app config.")
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*10)
 	defer cancel()
-	mailOrch, err := mail.New(ctx, mail.Config{
-		SES:          sesv2.NewFromConfig(awsConfig),
-		ForwardEmail: cfg.Email.Forward,
-		FromEmail:    cfg.Email.From,
-		Logger:       zlog,
+	mailOrch, err = mail.New(ctx, mail.Config{
+		SES:    sesv2.NewFromConfig(awsCfg),
+		Logger: zlog,
+		Cfg:    cfg,
 	})
 	if err != nil {
 		zlog.With(zap.Error(err)).Fatal("Failed to setup mail orchestrator.")
 	}
+}
 
-	grpcServer := grpc.NewServer(
-		grpc.ChainUnaryInterceptor(
-			grpc_zap.UnaryServerInterceptor(zlog),
-		),
-	)
+func withRequestLogging(logger *zap.Logger) func(Handler) Handler {
+	return func(next Handler) Handler {
+		return func(ctx context.Context, request events.APIGatewayProxyRequest) (response events.APIGatewayProxyResponse, err error) {
+			startTime := time.Now()
 
-	mailService := server.New(mailOrch)
-	mailservice_v1.RegisterMailServiceServer(grpcServer, mailService)
+			correlationID := request.Headers["X-Correlation-ID"]
+			if correlationID == "" {
+				correlationID = uuid.New().String()
+			}
 
-	gw := gateway.New(gateway.Config{
-		Host:     cfg.Service.ListenAddress,
-		Port:     cfg.Service.Port,
-		GRPCHost: cfg.Service.GRPCHost,
-		GRPCPort: cfg.Service.GRPCPort,
-	})
+			requestLogger := logger.With(
+				zap.String("correlation_id", correlationID),
+				zap.String("request_id", request.RequestContext.RequestID),
+				zap.String("path", request.Path),
+				zap.String("method", request.HTTPMethod),
+			)
 
-	if err := gw.Register(context.Background(), grpc.WithTransportCredentials(insecure.NewCredentials())); err != nil {
-		zlog.With(zap.Error(err)).Fatal("Failed to register gRPC gateway.")
-	}
+			ctx = context.WithValue(ctx, correlationIDKey, correlationID)
+			ctx = context.WithValue(ctx, loggerKey, requestLogger)
 
-	go func() {
-		if err := gw.Serve(); err != nil {
-			zlog.With(zap.Error(err)).Fatal("Failed to service gRPC gateway.")
+			requestLogger.Info("Processing request",
+				zap.Any("query_params", request.QueryStringParameters),
+				zap.Any("path_params", request.PathParameters),
+			)
+
+			response, err = next(ctx, request)
+			duration := time.Since(startTime)
+
+			if err != nil {
+				requestLogger.Error("Request Failed",
+					zap.Error(err),
+					zap.Duration("duration_ms", duration),
+				)
+			} else {
+				requestLogger.Info("Request Completed",
+					zap.Int("status_code", response.StatusCode),
+					zap.Duration("duration_ms", duration),
+				)
+			}
+
+			if response.Headers == nil {
+				response.Headers = make(map[string]string)
+			}
+			response.Headers["X-Correlation-ID"] = correlationID
+
+			return response, err
 		}
-	}()
+	}
+}
 
-	lis, err := net.Listen("tcp", fmt.Sprintf("%s:%d", cfg.Service.GRPCHost, cfg.Service.GRPCPort))
-	if err != nil {
-		zlog.With(zap.Error(err), zap.Int("port", cfg.Service.Port), zap.String("host", cfg.Service.ListenAddress)).Fatal("Failed to open TCP socket.")
+func correlationIDFromContext(ctx context.Context) string {
+	if correlationID, ok := ctx.Value(correlationIDKey).(string); ok {
+		return correlationID
+	}
+	return ""
+}
+
+func handleRequest(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	cid := correlationIDFromContext(ctx)
+
+	if err := mailOrch.SendMail(ctx, json.RawMessage(request.Body)); err != nil {
+		return events.APIGatewayProxyResponse{
+			StatusCode: http.StatusInternalServerError,
+			Body:       fmt.Sprintf("failed to process request with x-correlation-id: %s", cid),
+		}, nil
 	}
 
-	zlog.With(zap.Int("port", cfg.Service.Port), zap.String("host", cfg.Service.ListenAddress)).Info("Starting Email Service.")
-	if err := grpcServer.Serve(lis); err != nil {
-		zlog.With(zap.Error(err), zap.Int("port", cfg.Service.Port), zap.String("host", cfg.Service.ListenAddress)).Fatal("Failed to start email service.")
-	}
+	return events.APIGatewayProxyResponse{
+		StatusCode: http.StatusOK,
+		Body:       "Success",
+	}, nil
+}
+
+func main() {
+	handler := withRequestLogging(zlog)(handleRequest)
+	lambda.Start(handler)
 }

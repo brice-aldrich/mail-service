@@ -8,7 +8,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/sesv2"
 	"github.com/aws/aws-sdk-go-v2/service/sesv2/types"
-	mailservice_v1 "github.com/brice-aldrich/mail-service/gen/go/mailservice.v1"
+	"github.com/brice-aldrich/mail-service/config"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -36,7 +36,14 @@ type sesClient interface {
 //   - *mailservice_v1.SendMailResponse: The response object indicating the result of the send mail operation.
 //   - error: An error if any occurred during the preparation of template data or sending of emails.
 type Orchestrator interface {
-	SendMail(ctx context.Context, req *mailservice_v1.SendMailRequest) (*mailservice_v1.SendMailResponse, error)
+	SendMail(ctx context.Context, event json.RawMessage) error
+}
+
+type SendMailRequest struct {
+	Name    string
+	Email   string
+	Subject string
+	Message string
 }
 
 // Config holds the configuration required to initialize the Orchestrator.
@@ -48,17 +55,15 @@ type Orchestrator interface {
 //   - FromEmail: The email address from which emails will be sent.
 //   - Logger: The zap.Logger object used for logging.
 type Config struct {
-	SES          sesClient
-	ForwardEmail string
-	FromEmail    string
-	Logger       *zap.Logger
+	SES    sesClient
+	Logger *zap.Logger
+	Cfg    *config.Config
 }
 
 type orchestrator struct {
-	ses          sesClient
-	forwardEmail string
-	fromEmail    string
-	logger       *zap.Logger
+	ses    sesClient
+	logger *zap.Logger
+	cfg    *config.Config
 }
 
 // New creates a new instance of the Orchestrator with the provided configuration.
@@ -74,10 +79,9 @@ type orchestrator struct {
 //   - error: An error if any occurred during the initialization of the email templates.
 func New(ctx context.Context, cfg Config) (Orchestrator, error) {
 	o := &orchestrator{
-		ses:          cfg.SES,
-		forwardEmail: cfg.ForwardEmail,
-		fromEmail:    cfg.FromEmail,
-		logger:       cfg.Logger,
+		ses:    cfg.SES,
+		logger: cfg.Logger,
+		cfg:    cfg.Cfg,
 	}
 
 	if err := o.initTemplates(ctx); err != nil {
@@ -99,6 +103,11 @@ func New(ctx context.Context, cfg Config) (Orchestrator, error) {
 // Returns:
 //   - error: An error if any occurred during the initialization or updating of the email templates.
 func (o orchestrator) initTemplates(ctx context.Context) error {
+	templates := []*config.EmailTemplate{
+		o.cfg.Email.ForwardTemplate,
+		o.cfg.Email.ThankYouTemplate,
+	}
+
 	for _, t := range templates {
 		_, err := o.ses.GetEmailTemplate(ctx, &sesv2.GetEmailTemplateInput{
 			TemplateName: &t.Name,
@@ -146,52 +155,59 @@ func (o orchestrator) initTemplates(ctx context.Context) error {
 // Returns:
 //   - *mailservice_v1.SendMailResponse: The response object indicating the result of the send mail operation.
 //   - error: An error if any occurred during the preparation of template data or sending of emails.
-func (o orchestrator) SendMail(ctx context.Context, req *mailservice_v1.SendMailRequest) (*mailservice_v1.SendMailResponse, error) {
+func (o orchestrator) SendMail(ctx context.Context, event json.RawMessage) error {
+	var req SendMailRequest
+	if err := json.Unmarshal(event, &req); err != nil {
+		return fmt.Errorf("failed to unmarshal event: %w", err)
+	}
+
 	forwardData, err := constructForwardTemplateData(req.Message, req.Email)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to prepare forward template data: %v", err)
+		return status.Errorf(codes.Internal, "failed to prepare forward template data: %v", err)
 	}
 
 	_, err = o.ses.SendEmail(ctx, &sesv2.SendEmailInput{
 		Content: &types.EmailContent{
 			Template: &types.Template{
-				TemplateName: &forwardName,
+				TemplateName: &o.cfg.Email.ForwardTemplate.Name,
 				TemplateData: forwardData,
 			},
 		},
 		Destination: &types.Destination{
-			ToAddresses: []string{o.forwardEmail},
+			ToAddresses: []string{o.cfg.Email.Forward},
 		},
-		FromEmailAddress: &o.fromEmail,
+		FromEmailAddress: &o.cfg.Email.From,
 	})
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to send forward email: %v", err)
+		return status.Errorf(codes.Internal, "failed to send forward email: %v", err)
 	}
 
-	o.logger.Info("Forward email sent", zap.String("to", o.forwardEmail))
+	o.logger.Info("Forward email sent", zap.String("to", o.cfg.Email.From))
 
-	// thankYouData, err := constructThankYouTemplateData(req.Message)
-	// if err != nil {
-	// 	return nil, status.Errorf(codes.Internal, "failed to prepare thank you template data: %v", err)
-	// }
+	thankYouData, err := constructThankYouTemplateData(req.Message)
+	if err != nil {
+		return fmt.Errorf("failed to prepare thank you template data: %w", err)
+	}
 
-	// _, err = o.ses.SendEmail(ctx, &sesv2.SendEmailInput{
-	// 	Content: &types.EmailContent{
-	// 		Template: &types.Template{
-	// 			TemplateName: &thankYouTemplateName,
-	// 			TemplateData: thankYouData,
-	// 		},
-	// 	},
-	// 	Destination: &types.Destination{
-	// 		ToAddresses: []string{req.Email},
-	// 	},
-	// 	FromEmailAddress: &o.fromEmail,
-	// })
-	// if err != nil {
-	// 	return nil, status.Errorf(codes.Internal, "failed to send email thank you email: %v", err)
-	// }
+	_, err = o.ses.SendEmail(ctx, &sesv2.SendEmailInput{
+		Content: &types.EmailContent{
+			Template: &types.Template{
+				TemplateName: &o.cfg.Email.ThankYouTemplate.Name,
+				TemplateData: thankYouData,
+			},
+		},
+		Destination: &types.Destination{
+			ToAddresses: []string{req.Email},
+		},
+		FromEmailAddress: &o.cfg.Email.From,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to send thank you email: %w", err)
+	}
 
-	return &mailservice_v1.SendMailResponse{}, nil
+	o.logger.Info("Thank you email sent", zap.String("to", o.cfg.Email.From))
+
+	return nil
 }
 
 func constructForwardTemplateData(message string, from string) (*string, error) {

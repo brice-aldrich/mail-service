@@ -1,8 +1,11 @@
 package config
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 
+	"github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 	"github.com/caarlos0/env/v6"
 )
 
@@ -36,9 +39,18 @@ type Service struct {
 //   - Forward: The email address to which incoming emails will be forwarded. It is loaded from the environment variable "EMAIL_SERVICE_EMAIL_FORWARD".
 //   - ThankYouTemplate: A base64 standard encoded html template for your thank you email.
 type Email struct {
-	From             string `env:"EMAIL_SERVICE_EMAIL_FROM"`
-	Forward          string `env:"EMAIL_SERVICE_EMAIL_FORWARD"`
-	ThankYouTemplate string `env:"EMAIL_SERVICE_EMAIL_THANK_YOU_TEMPLATE"`
+	From                   string `env:"EMAIL_SERVICE_EMAIL_FROM"`
+	Forward                string `env:"EMAIL_SERVICE_EMAIL_FORWARD"`
+	ThankYouTemplatEncoded string `env:"EMAIL_SERVICE_EMAIL_THANK_YOU_TEMPLATE"`
+	ForwardTemplateEncoded string `env:"EMAIL_SERVICE_EMAIL_FORWARD_TEMPLATE"`
+
+	ThankYouTemplate *EmailTemplate
+	ForwardTemplate  *EmailTemplate
+}
+
+type EmailTemplate struct {
+	Name    string
+	Content *types.EmailTemplateContent
 }
 
 // Load loads the configuration from environment variables using the env package.
@@ -52,6 +64,29 @@ func Load() (*Config, error) {
 	if err := env.Parse(&cfg); err != nil {
 		return &cfg, fmt.Errorf("failed to load environment: %s", err.Error())
 	}
+
+	thankYouTemplateV, err := base64.StdEncoding.DecodeString(cfg.Email.ThankYouTemplatEncoded)
+	if err != nil {
+		return &cfg, fmt.Errorf("failed to decode thank you template: %s", err.Error())
+	}
+
+	forwardTemplateV, err := base64.StdEncoding.DecodeString(cfg.Email.ForwardTemplateEncoded)
+	if err != nil {
+		return &cfg, fmt.Errorf("failed to decode forward template: %s", err.Error())
+	}
+
+	var thankYouEmailTemplate *EmailTemplate
+	if err := json.Unmarshal(thankYouTemplateV, thankYouEmailTemplate); err != nil {
+		return &cfg, fmt.Errorf("failed to unmarshal thank you template: %s", err.Error())
+	}
+
+	var forwardEmailTemplate *EmailTemplate
+	if err := json.Unmarshal(forwardTemplateV, forwardEmailTemplate); err != nil {
+		return &cfg, fmt.Errorf("failed to unmarshal forward template: %s", err.Error())
+	}
+
+	cfg.Email.ThankYouTemplate = thankYouEmailTemplate
+	cfg.Email.ForwardTemplate = forwardEmailTemplate
 
 	return &cfg, nil
 }
