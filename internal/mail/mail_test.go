@@ -2,13 +2,14 @@ package mail
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sesv2"
 	"github.com/aws/aws-sdk-go-v2/service/sesv2/types"
-	mailservice_v1 "github.com/brice-aldrich/mail-service/gen/go/mailservice.v1"
+	"github.com/brice-aldrich/mail-service/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -92,6 +93,12 @@ func TestInitTemplatesUnit(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			o := orchestrator{
 				ses: tt.input.ses,
+				cfg: &config.Config{
+					Email: config.Email{
+						ForwardTemplate:  &config.EmailTemplate{},
+						ThankYouTemplate: &config.EmailTemplate{},
+					},
+				},
 			}
 
 			err := o.initTemplates(context.Background())
@@ -131,20 +138,20 @@ func TestSendMailUnit(t *testing.T) {
 				},
 			},
 		},
-		// {
-		// 	"handles failure to send thank you email",
-		// 	input{
-		// 		ses: &mockSESClient{
-		// 			sendEmailErrors: []string{"", "error sending thank you email"},
-		// 		},
-		// 	},
-		// 	want{
-		// 		errAssertion: func(t *testing.T, err error) {
-		// 			require.NotEmpty(t, err)
-		// 			assert.Contains(t, err.Error(), "error sending thank you email")
-		// 		},
-		// 	},
-		// },
+		{
+			"handles failure to send thank you email",
+			input{
+				ses: &mockSESClient{
+					sendEmailErrors: []string{"", "error sending thank you email"},
+				},
+			},
+			want{
+				errAssertion: func(t *testing.T, err error) {
+					require.NotEmpty(t, err)
+					assert.Contains(t, err.Error(), "error sending thank you email")
+				},
+			},
+		},
 		{
 			"is successful",
 			input{
@@ -165,9 +172,19 @@ func TestSendMailUnit(t *testing.T) {
 			o := orchestrator{
 				ses:    tt.input.ses,
 				logger: logger,
+				cfg: &config.Config{
+					Email: config.Email{
+						ForwardTemplate:  &config.EmailTemplate{},
+						ThankYouTemplate: &config.EmailTemplate{},
+					},
+				},
 			}
 
-			_, err := o.SendMail(context.Background(), &mailservice_v1.SendMailRequest{})
+			var req SendMailRequest
+			v, err := json.Marshal(req)
+			require.Empty(t, err)
+
+			err = o.SendMail(context.Background(), json.RawMessage(v))
 			tt.want.errAssertion(t, err)
 		})
 	}
