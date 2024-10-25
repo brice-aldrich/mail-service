@@ -184,12 +184,43 @@ resource "aws_api_gateway_integration_response" "options_integration_response" {
   }
 }
 
+resource "aws_api_gateway_method_response" "post_200" {
+  rest_api_id = aws_api_gateway_rest_api.email_api.id
+  resource_id = aws_api_gateway_resource.email.id
+  http_method = aws_api_gateway_method.email_post.http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Headers" = true
+  }
+}
+
+resource "aws_api_gateway_integration_response" "post_integration_response" {
+  rest_api_id = aws_api_gateway_rest_api.email_api.id
+  resource_id = aws_api_gateway_resource.email.id
+  http_method = aws_api_gateway_method.email_post.http_method
+  status_code = aws_api_gateway_method_response.post_200.status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Origin"  = "'https://${data.terraform_remote_state.website.outputs.website_url}'"
+    "method.response.header.Access-Control-Allow-Methods" = "'POST,OPTIONS'"
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,X-Amz-Date,Authorization,X-Api-Key'"
+  }
+
+  depends_on = [
+    aws_api_gateway_method_response.post_200
+  ]
+}
+
 # API Gateway deployment
 resource "aws_api_gateway_deployment" "dev" {
   rest_api_id = aws_api_gateway_rest_api.email_api.id
   depends_on  = [
     aws_api_gateway_integration.lambda_integration,
-    aws_api_gateway_integration_response.options_integration_response
+    aws_api_gateway_integration_response.options_integration_response,
+    aws_api_gateway_integration_response.post_integration_response
   ]
 }
 
